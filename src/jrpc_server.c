@@ -21,9 +21,15 @@
 static int jrpc_server_start(jrpc_server_t *server);
 
 void add_signal(jrpc_server_t *server, int signo, struct sigaction *action) {
+#ifdef LIBEV
 	ev_signal *s = malloc(sizeof(*s));
 	ev_signal_init(s, (void *)action->sa_handler, signo);
 	ev_signal_start(server->loop, s);
+#else
+	sigaction(signo, action, NULL);
+	if (signo == SIGINT || signo == SIGTERM || signo == SIGHUP)
+		server->jrpc_select.cb_int_signal = (void *)action->sa_handler;
+#endif
 }
 
 // get sockaddr, IPv4 or IPv6:
@@ -34,21 +40,94 @@ static void *get_in_addr(struct sockaddr *sa) {
 	return &(((struct sockaddr_in6*) sa)->sin6_addr);
 }
 
-static void close_connection(struct ev_loop *loop, ev_io *w) {
-	ev_io_stop(loop, w);
-	close(((jrpc_connection_t *) w)->fd);
-	free(((jrpc_connection_t *) w)->buffer);
-	free(((jrpc_connection_t *) w));
+static void close_connection(jrpc_loop_t *jrpc_loop) {
+	jrpc_conn_t *conn;
+	int res;
+#ifdef LIBEV
+	ev_io_stop(jrpc_loop->loop, jrpc_loop->io);
+	conn = (jrpc_conn_t *) jrpc_loop->io;
+#else
+	conn = jrpc_loop->conn;
+	res = remove_select_fds(&jrpc_loop->server->jrpc_select.fds_read, conn->fd);
+	if (res == -1) {
+		fprintf(stderr, "Internal error, cannot remove fd %d\n", conn->fd);
+		exit(EXIT_FAILURE);
+	}
+#endif
+	close(conn->fd);
+	free(conn->buffer);
+	free(conn);
 }
 
+#ifndef LIBEV
+void loop_select(jrpc_server_t *server) {
+	jrpc_select_t *jrpc_select = &server->jrpc_select;
+	fd_set readfds, writefds, errfds;
+	int ready, nfds;
+
+	if (server->debug_level)
+		printf("Loop select started.\n");
+
+	while (server->is_running) {
+		/* Initialize the file descriptor set. */
+		nfds = 0;
+		FD_ZERO(&readfds);
+		FD_ZERO(&writefds);
+		FD_ZERO(&errfds);
+
+		fill_fd_select(&readfds, &jrpc_select->fds_read, &nfds);
+		fill_fd_select(&writefds, &jrpc_select->fds_write, &nfds);
+		fill_fd_select(&errfds, &jrpc_select->fds_err, &nfds);
+		/* Call select() */
+		ready = select(nfds, &readfds, &writefds, &errfds, NULL);
+		if (ready == -1) {
+			if (EINTR == errno && server->jrpc_select.cb_int_signal) {
+				void (*callback)(void);
+				callback = server->jrpc_select.cb_int_signal;
+				callback();
+				server->is_running = 0;
+				if (server->debug_level)
+					printf("Signal receive after loop\n", ready);
+				break;
+			}
+			perror("select");
+			exit(EXIT_FAILURE);
+		}
+		if (server->debug_level)
+			printf("Select receive %d fd.\n", ready);
+		/* Callback time */
+		cb_fd_select(&readfds, &jrpc_select->fds_read, nfds);
+		cb_fd_select(&writefds, &jrpc_select->fds_write, nfds);
+		cb_fd_select(&errfds, &jrpc_select->fds_err, nfds);
+	}
+	if (server->debug_level)
+		printf("Leave loop select.\n");
+}
+#endif
+
+#ifdef LIBEV
 static void connection_cb(struct ev_loop *loop, ev_io *w, int revents) {
-	jrpc_connection_t *conn;
-	jrpc_request_t request;
-	jrpc_server_t *server = (jrpc_server_t *) w->data;
-	size_t bytes_read = 0;
+	jrpc_loop_t jrpc_loop_static;
+	jrpc_loop_t *jrpc_loop = &jrpc_loop_static;
+#else
+static void connection_cb(int fd, jrpc_loop_t *jrpc_loop) {
+#endif
+	jrpc_conn_t *conn;
+	jrpc_server_t *server;
+#ifdef LIBEV
 	//get our 'subclassed' event watcher
-	conn = (jrpc_connection_t *) w;
-	int fd = request.fd = conn->fd;
+	conn = (jrpc_conn_t *) w;
+	server = (jrpc_server_t *) w->data;
+	jrpc_loop->loop = loop;
+	jrpc_loop->io = w;
+	int fd = conn->fd;
+#else
+	conn = jrpc_loop->conn;
+	server = jrpc_loop->server;
+#endif
+	jrpc_request_t request;
+	size_t bytes_read = 0;
+	request.fd = fd;
 	request.debug_level = conn->debug_level;
 
 	if (server->debug_level)
@@ -58,23 +137,22 @@ static void connection_cb(struct ev_loop *loop, ev_io *w, int revents) {
 		char *new_buffer = realloc(conn->buffer, conn->buffer_size *= 2);
 		if (new_buffer == NULL) {
 			perror("Memory error");
-			return close_connection(loop, w);
+			return close_connection(jrpc_loop);
 		}
 		conn->buffer = new_buffer;
 		memset(conn->buffer + conn->pos, 0, conn->buffer_size - conn->pos);
 	}
 	// can not fill the entire buffer, string must be NULL terminated
 	int max_read_size = conn->buffer_size - conn->pos - 1;
-	if ((bytes_read = read(fd, conn->buffer + conn->pos, max_read_size))
-			== -1) {
+	if ((bytes_read = read(fd, conn->buffer + conn->pos, max_read_size)) == -1) {
 		perror("read");
-		return close_connection(loop, w);
+		return close_connection(jrpc_loop);
 	}
 	if (!bytes_read) {
 		// client closed the sending half of the connection
 		if (server->debug_level)
 			printf("Client closed connection.\n");
-		return close_connection(loop, w);
+		return close_connection(jrpc_loop);
 	}
 
 	char *end_ptr;
@@ -93,7 +171,7 @@ static void connection_cb(struct ev_loop *loop, ev_io *w, int revents) {
 			}
 			request.id = NULL;
 			send_error(&request, JRPC_PARSE_ERROR, strdup(err_msg));
-			return close_connection(loop, w);
+			return close_connection(jrpc_loop);
 		}
 		/* receive nothing */
 		return;
@@ -115,57 +193,81 @@ static void connection_cb(struct ev_loop *loop, ev_io *w, int revents) {
 	memmove(conn->buffer, end_ptr, strlen(end_ptr) + 2);
 
 	conn->pos = strlen(end_ptr);
-	memset(conn->buffer + conn->pos, 0,
-			conn->buffer_size - conn->pos - 1);
+	memset(conn->buffer + conn->pos, 0, conn->buffer_size - conn->pos - 1);
 	if (root)
 		cJSON_Delete(root);
 }
 
+#ifdef LIBEV
 static void accept_cb(struct ev_loop *loop, ev_io *w, int revents) {
+	jrpc_server_t *server = (jrpc_server_t *) w->data;
+	int fd = w->fd;
+#else
+static void accept_cb(int fd, jrpc_server_t *server) {
+	jrpc_loop_t *jrpc_loop = malloc(sizeof(jrpc_loop));
+	if (jrpc_loop <= 0) {
+		perror("malloc");
+		exit(EXIT_FAILURE);
+	}
+#endif
 	char s[INET6_ADDRSTRLEN];
-	jrpc_connection_t *connection_watcher;
+	jrpc_conn_t *conn;
 	struct sockaddr_storage their_addr; // connector's address information
 
-	connection_watcher = malloc(sizeof(jrpc_connection_t));
+	conn = malloc(sizeof(jrpc_conn_t));
 	socklen_t sin_size = sizeof their_addr;
 
-	connection_watcher->fd = accept(w->fd, (struct sockaddr *) &their_addr,
-			&sin_size);
-	if (connection_watcher->fd == -1) {
+	conn->fd = accept(fd, (struct sockaddr *) &their_addr, &sin_size);
+	if (conn->fd == -1) {
 		perror("accept");
-		free(connection_watcher);
-	} else {
-		if (((jrpc_server_t *) w->data)->debug_level) {
-			inet_ntop(their_addr.ss_family,
-					get_in_addr((struct sockaddr *)
-						&their_addr), s, sizeof s);
-			printf("server: got connection from %s\n", s);
-		}
-		ev_io_init(&connection_watcher->io, connection_cb,
-				connection_watcher->fd, EV_READ);
-		//copy pointer to jrpc_server_t
-		connection_watcher->io.data = w->data;
-		connection_watcher->buffer_size = 1500;
-		connection_watcher->buffer = malloc(1500);
-		memset(connection_watcher->buffer, 0, 1500);
-		connection_watcher->pos = 0;
-		/* copy debug_level, jrpc_connection_t has no pointer to
-		* jrpc_server_t
-		*/
-		connection_watcher->debug_level =
-				((jrpc_server_t *) w->data)->debug_level;
-		ev_io_start(loop, &connection_watcher->io);
+		free(conn);
+		return;
 	}
+
+	if (server->debug_level) {
+		inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *)
+				&their_addr), s, sizeof s);
+		printf("server: got connection from %s\n", s);
+	}
+	//copy pointer to jrpc_server_t
+#ifdef LIBEV
+	ev_io_init(&conn->io, connection_cb, conn->fd, EV_READ);
+	conn->io.data = w->data;
+#else
+	jrpc_loop->conn = conn;
+	jrpc_loop->server = server;
+#endif
+	conn->buffer_size = 1500;
+	conn->buffer = malloc(1500);
+	memset(conn->buffer, 0, 1500);
+	conn->pos = 0;
+	conn->debug_level = server->debug_level;
+#ifdef LIBEV
+	ev_io_start(loop, &conn->io);
+#else
+	add_select_fds(&server->jrpc_select.fds_read, conn->fd, connection_cb,
+			(void *)jrpc_loop);
+#endif
 }
 
 int jrpc_server_init(jrpc_server_t *server, int port_number) {
+#ifdef LIBEV
 	return jrpc_server_init_with_ev_loop(server, port_number, EV_DEFAULT);
+#else
+	return jrpc_server_init_with_select_loop(server, port_number);
+#endif
 }
 
+#ifdef LIBEV
 int jrpc_server_init_with_ev_loop(jrpc_server_t *server, int port_number,
 		struct ev_loop *loop) {
 	memset(server, 0, sizeof(jrpc_server_t));
 	server->loop = loop;
+#else
+int jrpc_server_init_with_select_loop(jrpc_server_t *server, int port_number) {
+	memset(server, 0, sizeof(jrpc_server_t));
+	server->is_running = 0;
+#endif
 	server->port_number = port_number;
 	char *debug_level_env = getenv("JRPC_DEBUG");
 	if (debug_level_env == NULL)
@@ -231,18 +333,32 @@ static int jrpc_server_start(jrpc_server_t *server) {
 	if (server->debug_level)
 		printf("server: waiting for connections...\n");
 
+#ifdef LIBEV
 	ev_io_init(&server->listen_watcher, accept_cb, sockfd, EV_READ);
 	server->listen_watcher.data = server;
 	ev_io_start(server->loop, &server->listen_watcher);
+#else
+	add_select_fds(&server->jrpc_select.fds_read, sockfd, accept_cb,
+			(void *)server);
+#endif
 	return 0;
 }
 
 void jrpc_server_run(jrpc_server_t *server) {
+#ifdef LIBEV
 	ev_run(server->loop, 0);
+#else
+	server->is_running = 1;
+	loop_select(server);
+#endif
 }
 
 int jrpc_server_stop(jrpc_server_t *server) {
+#ifdef LIBEV
 	ev_break(server->loop, EVBREAK_ALL);
+#else
+	server->is_running = 0;
+#endif
 	return 0;
 }
 

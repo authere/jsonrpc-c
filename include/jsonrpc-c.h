@@ -31,7 +31,7 @@
 #define JRPC_INTERNAL_ERROR -32603
 
 #define JRPC_VERSION "2.0"
-
+/* struct jrpc_context_t is passed to procedure */
 typedef struct {
 	void *data;
 	int error_code;
