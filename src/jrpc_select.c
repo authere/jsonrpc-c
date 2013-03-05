@@ -9,8 +9,58 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <errno.h>
+#include <string.h>
 
 #include "jrpc_select.h"
+
+
+void loop_select(jrpc_select_t *jrpc_select, int debug, int *is_running) {
+	fd_set readfds, writefds, errfds;
+	int ready, nfds, err;
+
+	if (debug)
+		printf("Loop select started.\n");
+
+	while (*is_running) {
+		err = 0;
+		/* Initialize the file descriptor set. */
+		nfds = 0;
+		FD_ZERO(&readfds);
+		FD_ZERO(&writefds);
+		FD_ZERO(&errfds);
+
+		fill_fd_select(&readfds, &jrpc_select->fds_read, &nfds);
+		fill_fd_select(&writefds, &jrpc_select->fds_write, &nfds);
+		fill_fd_select(&errfds, &jrpc_select->fds_err, &nfds);
+
+		ready = 0;
+		while (*is_running && !ready) {
+			/* Call select() */
+			ready = select(nfds, &readfds, &writefds, &errfds, NULL);
+			if (ready == -1) {
+				/* continue when receive interrupt
+				 * the callback will manage the situation
+				 */
+				if (EINTR == errno)
+					continue;
+				perror("select");
+				exit(EXIT_FAILURE);
+			}
+		}
+		if (!*is_running)
+			break;
+		if (debug)
+			printf("Select receive %d fd.\n", ready);
+		if (ready > 0) {
+			/* Callback time */
+			cb_fd_select(&readfds, &jrpc_select->fds_read, nfds);
+			cb_fd_select(&writefds, &jrpc_select->fds_write, nfds);
+			cb_fd_select(&errfds, &jrpc_select->fds_err, nfds);
+		}
+	}
+	if (debug)
+		printf("Leave loop select.\n");
+}
 
 void add_select_fds(jrpc_select_fds_t *fds, int fd, void *cb, void *data) {
 	int *fd_l;
@@ -64,7 +114,7 @@ int remove_select_fds(jrpc_select_fds_t *fds, int fd) {
 	int i;
 	for (i = 0; i < fds->size; i++) {
 		if (fds->fd[i] == fd) {
-			fds->fd[i] = NULL;
+			fds->fd[i] = 0;
 			fds->cb[i] = NULL;
 			free(fds->data[i]);
 			fds->data[i] = NULL;

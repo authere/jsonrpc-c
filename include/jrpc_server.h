@@ -35,7 +35,7 @@ typedef struct {
 	struct ev_loop *loop;
 	ev_io listen_watcher;
 #else
-	int is_running;
+	volatile int is_running;
 	jrpc_select_t jrpc_select;
 #endif
 	procedure_list_t procedure_list;

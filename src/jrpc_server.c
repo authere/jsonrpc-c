@@ -27,8 +27,6 @@ void add_signal(jrpc_server_t *server, int signo, struct sigaction *action) {
 	ev_signal_start(server->loop, s);
 #else
 	sigaction(signo, action, NULL);
-	if (signo == SIGINT || signo == SIGTERM || signo == SIGHUP)
-		server->jrpc_select.cb_int_signal = (void *)action->sa_handler;
 #endif
 }
 
@@ -47,8 +45,9 @@ static void close_connection(jrpc_loop_t *jrpc_loop) {
 	ev_io_stop(jrpc_loop->loop, jrpc_loop->io);
 	conn = (jrpc_conn_t *) jrpc_loop->io;
 #else
+	jrpc_server_t *server = jrpc_loop->server;
 	conn = jrpc_loop->conn;
-	res = remove_select_fds(&jrpc_loop->server->jrpc_select.fds_read, conn->fd);
+	res = remove_select_fds(&server->jrpc_select.fds_read, conn->fd);
 	if (res == -1) {
 		fprintf(stderr, "Internal error, cannot remove fd %d\n", conn->fd);
 		exit(EXIT_FAILURE);
@@ -60,49 +59,6 @@ static void close_connection(jrpc_loop_t *jrpc_loop) {
 }
 
 #ifndef LIBEV
-void loop_select(jrpc_server_t *server) {
-	jrpc_select_t *jrpc_select = &server->jrpc_select;
-	fd_set readfds, writefds, errfds;
-	int ready, nfds;
-
-	if (server->debug_level)
-		printf("Loop select started.\n");
-
-	while (server->is_running) {
-		/* Initialize the file descriptor set. */
-		nfds = 0;
-		FD_ZERO(&readfds);
-		FD_ZERO(&writefds);
-		FD_ZERO(&errfds);
-
-		fill_fd_select(&readfds, &jrpc_select->fds_read, &nfds);
-		fill_fd_select(&writefds, &jrpc_select->fds_write, &nfds);
-		fill_fd_select(&errfds, &jrpc_select->fds_err, &nfds);
-		/* Call select() */
-		ready = select(nfds, &readfds, &writefds, &errfds, NULL);
-		if (ready == -1) {
-			if (EINTR == errno && server->jrpc_select.cb_int_signal) {
-				void (*callback)(void);
-				callback = server->jrpc_select.cb_int_signal;
-				callback();
-				server->is_running = 0;
-				if (server->debug_level)
-					printf("Signal receive after loop\n", ready);
-				break;
-			}
-			perror("select");
-			exit(EXIT_FAILURE);
-		}
-		if (server->debug_level)
-			printf("Select receive %d fd.\n", ready);
-		/* Callback time */
-		cb_fd_select(&readfds, &jrpc_select->fds_read, nfds);
-		cb_fd_select(&writefds, &jrpc_select->fds_write, nfds);
-		cb_fd_select(&errfds, &jrpc_select->fds_err, nfds);
-	}
-	if (server->debug_level)
-		printf("Leave loop select.\n");
-}
 #endif
 
 #ifdef LIBEV
@@ -349,7 +305,7 @@ void jrpc_server_run(jrpc_server_t *server) {
 	ev_run(server->loop, 0);
 #else
 	server->is_running = 1;
-	loop_select(server);
+	loop_select(&server->jrpc_select, server->debug_level, &server->is_running);
 #endif
 }
 

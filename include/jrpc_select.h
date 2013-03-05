@@ -21,10 +21,9 @@ typedef struct {
 	jrpc_select_fds_t fds_read;
 	jrpc_select_fds_t fds_write;
 	jrpc_select_fds_t fds_err;
-	/* Quick fonctionality to cb when interrupt signal */
-	void *cb_int_signal;
 } jrpc_select_t;
 
+void loop_select(jrpc_select_t *jrpc_select, int debug, int *is_running);
 void add_select_fds(jrpc_select_fds_t *fds, int fd, void *cb, void *data);
 int remove_select_fds(jrpc_select_fds_t *fds, int fd);
 void fill_fd_select(fd_set *fds, jrpc_select_fds_t *jrpc_fds, int *ndfs);
