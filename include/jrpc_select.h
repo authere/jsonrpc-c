@@ -7,6 +7,7 @@
 
 #ifndef JRPC_SELECT_H_
 #define JRPC_SELECT_H_
+#include <sys/select.h>
 
 typedef void (*select_cb) (int, void *);
 typedef struct {
