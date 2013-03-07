@@ -192,13 +192,10 @@ static int invoke_procedure(jrpc_request_t *request, procedure_list_t *procedure
 }
 
 static void jrpc_procedure_destroy(jrpc_procedure_t *procedure) {
+	/* Don't free data, keep this job to the caller */
 	if (procedure->name){
 		free(procedure->name);
 		procedure->name = NULL;
-	}
-	if (procedure->data){
-		free(procedure->data);
-		procedure->data = NULL;
 	}
 }
 

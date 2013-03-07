@@ -270,7 +270,7 @@ cJSON *cJSON_Parse_Stream(const char *value, char **end_ptr)
 	ep=0;
 	if (!c) return 0;       /* memory fail */
 
-	if (!(*end_ptr=parse_value(c,skip(value)))) {cJSON_Delete(c);return 0;}
+	if (!(*end_ptr=(char **)parse_value(c,skip(value)))) {cJSON_Delete(c);return 0;}
 	return c;
 }
 
