@@ -21,8 +21,6 @@ static int exec_context(jrpc_context_t *ctx, procedure_list_t *procedure_list,
 static int invoke_procedure(jrpc_request_t *request, procedure_list_t *procedure_list);
 
 static int send_response(jrpc_request_t *request, char *response) {
-	if (request->debug_level)
-		printf("JSON Response on fd %d:\n%s\n", request->fd, response);
 	write(request->fd, response, strlen(response));
 	write(request->fd, "\n", 1);
 	return 0;
@@ -31,7 +29,13 @@ static int send_response(jrpc_request_t *request, char *response) {
 int send_error(jrpc_request_t *request, int code, char *message) {
 	int return_value = 0;
 	cJSON *result_root = create_json_error(code, message, request->id);
-	char *str_result = cJSON_Print(result_root);
+	char *str_result;
+	if (request->debug_level) {
+		str_result = cJSON_Print(result_root);
+		printf("JSON Response on fd %d\n%s\n", request->fd, str_result);
+		free(str_result);
+	}
+	str_result = cJSON_PrintUnformatted(result_root);
 	return_value = send_response(request, str_result);
 	free(str_result);
 	cJSON_Delete(result_root);
@@ -42,7 +46,13 @@ int send_error(jrpc_request_t *request, int code, char *message) {
 int send_result(jrpc_request_t *request, cJSON *result) {
 	int return_value = 0;
 	cJSON *result_root = create_json_result(result, request->id);
-	char *str_result = cJSON_Print(result_root);
+	char *str_result;
+	if (request->debug_level) {
+		str_result = cJSON_Print(result_root);
+		printf("JSON Response on fd %d\n%s\n", request->fd, str_result);
+		free(str_result);
+	}
+	str_result = cJSON_PrintUnformatted(result_root);
 	return_value = send_response(request, str_result);
 	free(str_result);
 	cJSON_Delete(result_root);
@@ -158,6 +168,7 @@ static int exec_context(jrpc_context_t *ctx, procedure_list_t *procedure_list,
 	while (i--) {
 		if (!strcmp(procedure_list->procedures[i].name, request->method)) {
 			ctx->data = procedure_list->procedures[i].data;
+			ctx->name = procedure_list->procedures[i].name;
 			ctx->result = procedure_list->procedures[i].function(ctx,
 					request->params, request->id);
 			return 1;
@@ -172,6 +183,7 @@ static int invoke_procedure(jrpc_request_t *request, procedure_list_t *procedure
 	ctx.error_message = NULL;
 	ctx.result = NULL;
 	ctx.data = NULL;
+	ctx.name = NULL;
 
 	int context = exec_context(&ctx, procedure_list, request);
 	if (request->is_notification) {

@@ -33,6 +33,7 @@
 #define JRPC_VERSION "2.0"
 /* struct jrpc_context_t is passed to procedure */
 typedef struct {
+	char *name;
 	void *data;
 	int error_code;
 	char *error_message;
