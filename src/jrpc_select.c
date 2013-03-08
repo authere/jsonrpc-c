@@ -10,9 +10,12 @@
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
+#include <fcntl.h>
 
 #include "jrpc_select.h"
 
+void fill_fd_select(fd_set *fds, jrpc_select_fds_t *jrpc_fds, int *ndfs);
+void cb_fd_select(fd_set *fds, jrpc_select_fds_t *jrpc_fds, int ndfs);
 
 void loop_select(jrpc_select_t *jrpc_select, int debug, int *is_running) {
 	fd_set readfds, writefds, errfds;
@@ -128,16 +131,20 @@ int remove_select_fds(jrpc_select_fds_t *fds, int fd) {
 void fill_fd_select(fd_set *fds, jrpc_select_fds_t *jrpc_fds, int *ndfs) {
 	/* ndfs is the max number of fd */
 	int ndfs_local = *ndfs;
-	int fd, i;
+	int fd, i, rc;
 	for (i = 0; i < jrpc_fds->size; i++) {
 		fd = jrpc_fds->fd[i];
-		if (!fd) /* empty fd */
+		if (!fd || !jrpc_fds->cb[i]) /* empty fd or empty callback*/
 			continue;
-
 		if (fd >= FD_SETSIZE) {
 			fprintf(stderr, "fd %d is upper then FD_SETSIZE\n", fd);
 			continue;
 		}
+		/* check if fd is open */
+		rc = fcntl(fd, F_GETFL);
+		if (rc < 0)
+			continue;
+		/* set the fd */
 		if (ndfs_local <= fd)
 			ndfs_local = fd + 1;
 		FD_SET(fd, fds);
@@ -149,11 +156,10 @@ void cb_fd_select(fd_set *fds, jrpc_select_fds_t *jrpc_fds, int ndfs) {
 	int i, fd;
 	for (i = 0; i < jrpc_fds->size; i++) {
 		fd = jrpc_fds->fd[i];
-		if (!fd)
+		if (!fd || !jrpc_fds->cb[i])
 			continue;
 		if (FD_ISSET(fd, fds)) {
 			jrpc_fds->cb[i](fd, jrpc_fds->data[i]);
 		}
 	}
 }
-
