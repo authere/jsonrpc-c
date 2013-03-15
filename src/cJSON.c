@@ -873,6 +873,8 @@ cJSON *cJSON_CreateNumber(double num) {
 	return item;
 }
 cJSON *cJSON_CreateString(const char *string) {
+	if (!string)
+		return cJSON_CreateNull();
 	cJSON *item = cJSON_New_Item();
 	if (item) {
 		item->type = cJSON_String;
