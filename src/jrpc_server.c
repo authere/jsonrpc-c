@@ -37,7 +37,7 @@ static void close_connection(jrpc_loop_t *jrpc_loop) {
 	int res;
 	jrpc_server_t *server = jrpc_loop->server;
 	conn = jrpc_loop->conn;
-	res = remove_select_fds(&server->jrpc_select.fds_read, conn->fd);
+	res = remove_select_fds(&server->jrpc_select.fds_read, conn->fd, 1);
 	if (res == -1) {
 		fprintf(stderr, "Internal error, cannot remove fd %d\n", conn->fd);
 		exit(EXIT_FAILURE);
@@ -131,6 +131,7 @@ static void accept_cb(int fd, jrpc_server_t *server) {
 		perror("malloc");
 		exit(EXIT_FAILURE);
 	}
+	int limit_connection = get_limit_fd_number();
 	char s[INET6_ADDRSTRLEN];
 	jrpc_conn_t *conn;
 	struct sockaddr_storage their_addr; // connector's address information
@@ -142,6 +143,14 @@ static void accept_cb(int fd, jrpc_server_t *server) {
 	if (conn->fd == -1) {
 		perror("accept");
 		free(conn);
+		return;
+	}
+	/* Limitation of select */
+	if (limit_connection <= conn->fd) {
+		close(conn->fd);
+		free(conn);
+		fprintf(stderr, "Reach max connection, limit %d.",
+				limit_connection, s);
 		return;
 	}
 

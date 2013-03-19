@@ -26,6 +26,8 @@ typedef struct {
 
 void loop_select(jrpc_select_t *jrpc_select, int debug, int *is_running);
 void add_select_fds(jrpc_select_fds_t *fds, int fd, void *cb, void *data);
-int remove_select_fds(jrpc_select_fds_t *fds, int fd);
+/* cleanup_data set 1 to free data, else set 0 to do nothing. */
+int remove_select_fds(jrpc_select_fds_t *fds, int fd, int cleanup_data);
+int get_limit_fd_number();
 
 #endif

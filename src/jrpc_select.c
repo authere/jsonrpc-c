@@ -112,15 +112,17 @@ void add_select_fds(jrpc_select_fds_t *fds, int fd, void *cb, void *data) {
 	fds->nb++;
 }
 
-int remove_select_fds(jrpc_select_fds_t *fds, int fd) {
+int remove_select_fds(jrpc_select_fds_t *fds, int fd, int cleanup_data) {
 	/* return 0 when success */
 	int i;
 	for (i = 0; i < fds->size; i++) {
 		if (fds->fd[i] == fd) {
 			fds->fd[i] = 0;
 			fds->cb[i] = NULL;
-			free(fds->data[i]);
-			fds->data[i] = NULL;
+			if (fds->data[i] && cleanup_data) {
+				free(fds->data[i]);
+				fds->data[i] = NULL;
+			}
 			fds->nb--;
 			return 0;
 		}
@@ -162,4 +164,8 @@ void cb_fd_select(fd_set *fds, jrpc_select_fds_t *jrpc_fds, int ndfs) {
 			jrpc_fds->cb[i](fd, jrpc_fds->data[i]);
 		}
 	}
+}
+
+int get_limit_fd_number() {
+	return (int)FD_SETSIZE;
 }

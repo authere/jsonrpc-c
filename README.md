@@ -20,6 +20,11 @@ How?
 Includes cJSON (with a small patch on my fork).
 No further dependencies.
 
+Limitation?
+----
+Jrpc-c use select. It's limited by his 1024 (by default) file descriptor.
+4 files descriptors is reserved by the server and it uses 1 per connection.
+
 ###Testing
 
 Run `autoreconf -i`  before `./configure` and `make`
@@ -37,3 +42,4 @@ Who?
 ----
 
 @hmngomes
+Mathben
