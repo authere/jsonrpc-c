@@ -53,9 +53,10 @@ int main(void) {
 
 	// Add signal handler to terminate server
 	action.sa_handler = handle_kill_signal;
-	add_signal(&my_server, SIGINT, &action);
-	add_signal(&my_server, SIGTERM, &action);
-	add_signal(&my_server, SIGHUP, &action);
+	action.sa_flags = 0;
+	sigaction(SIGINT, &action, NULL);
+	sigaction(SIGTERM, &action, NULL);
+	sigaction(SIGHUP, &action, NULL);
 
 	jrpc_server_run(&my_server);
 

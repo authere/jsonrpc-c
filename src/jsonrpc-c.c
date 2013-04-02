@@ -100,11 +100,11 @@ int eval_request(jrpc_request_t *request, cJSON *root, procedure_list_t *procedu
 	request->id = cJSON_CreateNull();
 	switch (validate) {
 	case -1:
-		if (!sprintf(err, "The JSON-RPC-c only support version %s.", JRPC_VERSION)) {
+		if (!sprintf(err_tbl, "The JSON-RPC-c only support version %s.", JRPC_VERSION)) {
 			perror("sprintf");
 			exit(EXIT_FAILURE);
 		}
-		send_error(request, JRPC_INVALID_REQUEST, strdup(err));
+		send_error(request, JRPC_INVALID_REQUEST, strdup(err_tbl));
 		break;
 	case -2:
 		err = "The JSON sent has invalid params. Need Object or Array.";

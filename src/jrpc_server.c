@@ -20,10 +20,6 @@
 
 static int jrpc_server_start(jrpc_server_t *server);
 
-void add_signal(jrpc_server_t *server, int signo, struct sigaction *action) {
-	sigaction(signo, action, NULL);
-}
-
 // get sockaddr, IPv4 or IPv6:
 static void *get_in_addr(struct sockaddr *sa) {
 	if (sa->sa_family == AF_INET) {
