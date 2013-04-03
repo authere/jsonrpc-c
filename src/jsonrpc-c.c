@@ -71,7 +71,7 @@ static cJSON *create_json_error(int code, char *message, cJSON *id) {
 static cJSON *create_json_result(cJSON *result, cJSON *id) {
 	cJSON *result_root = cJSON_CreateObject();
 	cJSON_AddItemToObject(result_root, "jsonrpc",
-			cJSON_CreateString(strdup(JRPC_VERSION)));
+			cJSON_CreateString(JRPC_VERSION));
 	if (result)
 		cJSON_AddItemToObject(result_root, "result", result);
 	if (!id)

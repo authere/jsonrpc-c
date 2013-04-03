@@ -33,7 +33,7 @@ static void close_connection(jrpc_loop_t *jrpc_loop) {
 	int res;
 	jrpc_server_t *server = jrpc_loop->server;
 	conn = jrpc_loop->conn;
-	res = remove_select_fds(&server->jrpc_select.fds_read, conn->fd, 1);
+	res = remove_select_fds(&server->jrpc_select.fds_read, conn->fd);
 	if (res == -1) {
 		fprintf(stderr, "Internal error, cannot remove fd %d\n", conn->fd);
 		exit(EXIT_FAILURE);
@@ -122,7 +122,7 @@ static void connection_cb(int fd, jrpc_loop_t *jrpc_loop) {
 }
 
 static void accept_cb(int fd, jrpc_server_t *server) {
-	jrpc_loop_t *jrpc_loop = malloc(sizeof(jrpc_loop));
+	jrpc_loop_t *jrpc_loop = malloc(sizeof(jrpc_loop_t));
 	if (jrpc_loop <= 0) {
 		perror("malloc");
 		exit(EXIT_FAILURE);
@@ -164,7 +164,7 @@ static void accept_cb(int fd, jrpc_server_t *server) {
 	conn->pos = 0;
 	conn->debug_level = server->debug_level;
 	add_select_fds(&server->jrpc_select.fds_read, conn->fd, connection_cb,
-			(void *)jrpc_loop);
+			(void *)jrpc_loop, 0);
 }
 
 int jrpc_server_init(jrpc_server_t *server, int port_number) {
@@ -240,7 +240,7 @@ static int jrpc_server_start(jrpc_server_t *server) {
 		printf("server: waiting for connections...\n");
 
 	add_select_fds(&server->jrpc_select.fds_read, sockfd, accept_cb,
-			(void *)server);
+			(void *)server, 0);
 	return 0;
 }
 

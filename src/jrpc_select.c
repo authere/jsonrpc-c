@@ -65,11 +65,10 @@ void loop_select(jrpc_select_t *jrpc_select, int debug, int *is_running) {
 		printf("Leave loop select.\n");
 }
 
-void add_select_fds(jrpc_select_fds_t *fds, int fd, void *cb, void *data) {
-	int *fd_l;
-	select_cb *cb_l;
-	void **data_l;
+void add_select_fds(jrpc_select_fds_t *fds, int fd, void *cb, void *data,
+		int free_data) {
 	int i, last_size, mem_size;
+	jrpc_select_fds_data_t *fds_data;
 
 	if (fds->nb >= fds->size) {
 		last_size = fds->size;
@@ -77,51 +76,47 @@ void add_select_fds(jrpc_select_fds_t *fds, int fd, void *cb, void *data) {
 			fds->size = 1;
 		fds->size *= 2;
 		
-		fd_l = calloc(sizeof(int), sizeof(int) * fds->size);
-		cb_l = calloc(sizeof(select_cb), sizeof(select_cb) * fds->size);
-		data_l = calloc(sizeof(void *), sizeof(void *) * fds->size);
-		/* to be sure to have only NULL */
-		memset(fd_l, 0, sizeof(int) * fds->size);
-		memset(cb_l, 0, fds->size);
-		memset(data_l, 0, fds->size);
-		for (i = 0; i < last_size; i++) {
-			fd_l[i] = fds->fd[i];
-			cb_l[i] = fds->cb[i];
-			data_l[i] = fds->data[i];
+		fds_data = malloc(sizeof(jrpc_select_fds_data_t) * fds->size);
+		if (!fds_data) {
+			perror("malloc");
+			exit(EXIT_FAILURE);
 		}
-		free(fds->fd);
-		free(fds->cb);
+		/* to be sure to have only NULL */
+		memset(fds_data, 0, sizeof(jrpc_select_fds_data_t) * fds->size);
+		for (i = 0; i < last_size; i++) {
+			fds_data[i].fd = fds->data[i].fd;
+			fds_data[i].cb = fds->data[i].cb;
+			fds_data[i].data = fds->data[i].data;
+			fds_data[i].free_data = fds->data[i].free_data;
+		}
 		free(fds->data);
-		fds->fd = fd_l;
-		fds->cb = cb_l;
-		fds->data = data_l;
+		fds->data = fds_data;
 	} else {
-		fd_l = fds->fd;
-		cb_l = fds->cb;
-		data_l = fds->data;
+		fds_data = fds->data;
 	}
 
 	/* search first fd == NULL */
 	for (i = 0; i < fds->nb; i++) {
-		if (!fd_l[i])
+		if (!fds_data[i].fd)
 			break;
 	}
-	fd_l[i] = fd;
-	cb_l[i] = (select_cb)cb;
-	data_l[i] = data;
+	fds_data[i].fd = fd;
+	fds_data[i].cb = (select_cb)cb;
+	fds_data[i].data = data;
+	fds_data[i].free_data = free_data;
 	fds->nb++;
 }
 
-int remove_select_fds(jrpc_select_fds_t *fds, int fd, int cleanup_data) {
+int remove_select_fds(jrpc_select_fds_t *fds, int fd) {
 	/* return 0 when success */
 	int i;
 	for (i = 0; i < fds->size; i++) {
-		if (fds->fd[i] == fd) {
-			fds->fd[i] = 0;
-			fds->cb[i] = NULL;
-			if (fds->data[i] && cleanup_data) {
-				free(fds->data[i]);
-				fds->data[i] = NULL;
+		if (fds->data[i].fd == fd) {
+			fds->data[i].fd = 0;
+			fds->data[i].cb = NULL;
+			if (fds->data[i].free_data && fds->data[i].data) {
+				free(fds->data[i].data);
+				fds->data[i].data = NULL;
 			}
 			fds->nb--;
 			return 0;
@@ -130,13 +125,18 @@ int remove_select_fds(jrpc_select_fds_t *fds, int fd, int cleanup_data) {
 	return -1;
 }
 
+int remove_select_all_fds() {
+	/* TODO complete this and free all memory */
+	return 1;
+}
+
 void fill_fd_select(fd_set *fds, jrpc_select_fds_t *jrpc_fds, int *ndfs) {
 	/* ndfs is the max number of fd */
 	int ndfs_local = *ndfs;
 	int fd, i, rc;
 	for (i = 0; i < jrpc_fds->size; i++) {
-		fd = jrpc_fds->fd[i];
-		if (!fd || !jrpc_fds->cb[i]) /* empty fd or empty callback*/
+		fd = jrpc_fds->data[i].fd;
+		if (!fd || !jrpc_fds->data[i].cb) /* empty fd or empty callback*/
 			continue;
 		if (fd >= FD_SETSIZE) {
 			fprintf(stderr, "fd %d is upper then FD_SETSIZE\n", fd);
@@ -157,11 +157,11 @@ void fill_fd_select(fd_set *fds, jrpc_select_fds_t *jrpc_fds, int *ndfs) {
 void cb_fd_select(fd_set *fds, jrpc_select_fds_t *jrpc_fds, int ndfs) {
 	int i, fd;
 	for (i = 0; i < jrpc_fds->size; i++) {
-		fd = jrpc_fds->fd[i];
-		if (!fd || !jrpc_fds->cb[i])
+		fd = jrpc_fds->data[i].fd;
+		if (!fd || !jrpc_fds->data[i].cb)
 			continue;
 		if (FD_ISSET(fd, fds)) {
-			jrpc_fds->cb[i](fd, jrpc_fds->data[i]);
+			jrpc_fds->data[i].cb(fd, jrpc_fds->data[i].data);
 		}
 	}
 }

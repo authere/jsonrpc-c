@@ -11,9 +11,16 @@
 
 typedef void (*select_cb) (int, void *);
 typedef struct {
-	int *fd; /* table of fd */
-	select_cb *cb; /* callback */
-	void **data; /* table of data */
+	int fd; /* table of fd */
+	select_cb cb; /* callback */
+	void *data; /* table of data */
+	int free_data; /* apply free when delete fds on data */
+	/* function to call when not null when delete fds */
+	/* void *destroy_data;*/
+} jrpc_select_fds_data_t;
+
+typedef struct {
+	jrpc_select_fds_data_t *data; /* tbl of data */
 	int nb; /* number of fd */
 	int size; /* size of table */
 } jrpc_select_fds_t;
@@ -25,9 +32,10 @@ typedef struct {
 } jrpc_select_t;
 
 void loop_select(jrpc_select_t *jrpc_select, int debug, int *is_running);
-void add_select_fds(jrpc_select_fds_t *fds, int fd, void *cb, void *data);
+void add_select_fds(jrpc_select_fds_t *fds, int fd, void *cb, void *data,
+		int free_data);
 /* cleanup_data set 1 to free data, else set 0 to do nothing. */
-int remove_select_fds(jrpc_select_fds_t *fds, int fd, int cleanup_data);
+int remove_select_fds(jrpc_select_fds_t *fds, int fd);
 int get_limit_fd_number();
 
 #endif
