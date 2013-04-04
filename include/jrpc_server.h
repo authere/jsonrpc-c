@@ -33,8 +33,8 @@ typedef struct {
 	jrpc_conn_t *conn;
 } jrpc_loop_t;
 
-int jrpc_server_init(jrpc_server_t *server, int port_number);
-int jrpc_server_init_with_select_loop(jrpc_server_t *server, int port_number);
+int jrpc_server_init(jrpc_server_t **server, int port_number);
+int jrpc_server_init_with_select_loop(jrpc_server_t **server, int port_number);
 void jrpc_server_run(jrpc_server_t *server);
 int jrpc_server_stop(jrpc_server_t *server);
 void jrpc_server_destroy(jrpc_server_t *server);

@@ -18,7 +18,8 @@
 
 #include "jrpc_server.h"
 
-static int jrpc_server_start(jrpc_server_t *server);
+static int _jrpc_server_start(jrpc_server_t *server);
+static void _jrpc_loop_destroy(void *jrpc_loop_data);
 
 // get sockaddr, IPv4 or IPv6:
 static void *get_in_addr(struct sockaddr *sa) {
@@ -164,14 +165,21 @@ static void accept_cb(int fd, jrpc_server_t *server) {
 	conn->pos = 0;
 	conn->debug_level = server->debug_level;
 	add_select_fds(&server->jrpc_select.fds_read, conn->fd, connection_cb,
-			(void *)jrpc_loop, 0);
+			(void *)jrpc_loop, 0, _jrpc_loop_destroy);
 }
 
-int jrpc_server_init(jrpc_server_t *server, int port_number) {
+int jrpc_server_init(jrpc_server_t **server, int port_number) {
 	return jrpc_server_init_with_select_loop(server, port_number);
 }
 
-int jrpc_server_init_with_select_loop(jrpc_server_t *server, int port_number) {
+int jrpc_server_init_with_select_loop(jrpc_server_t **the_server, int port_number) {
+	jrpc_server_t *server;
+	*the_server = malloc(sizeof(jrpc_server_t));
+	if (!*the_server) {
+		perror("malloc");
+		exit(EXIT_FAILURE);
+	}
+	server = *the_server;
 	memset(server, 0, sizeof(jrpc_server_t));
 	server->is_running = 0;
 	server->port_number = port_number;
@@ -182,15 +190,16 @@ int jrpc_server_init_with_select_loop(jrpc_server_t *server, int port_number) {
 		server->debug_level = strtol(debug_level_env, NULL, 10);
 		printf("JSONRPC-C Debug level %d\n", server->debug_level);
 	}
-	return jrpc_server_start(server);
+	return _jrpc_server_start(server);
 }
 
-static int jrpc_server_start(jrpc_server_t *server) {
+static int _jrpc_server_start(jrpc_server_t *server) {
 	int sockfd;
 	struct addrinfo hints, *servinfo, *p;
 	int yes = 1;
 	int rv;
 	char PORT[6];
+
 	sprintf(PORT, "%d", server->port_number);
 	memset(&hints, 0, sizeof hints);
 	hints.ai_family = AF_UNSPEC;
@@ -225,12 +234,12 @@ static int jrpc_server_start(jrpc_server_t *server) {
 		break;
 	}
 
+	freeaddrinfo(servinfo); // all done with this structure
+
 	if (p == NULL) {
 		fprintf(stderr, "server: failed to bind\n");
 		return 2;
 	}
-
-	freeaddrinfo(servinfo); // all done with this structure
 
 	if (listen(sockfd, 5) == -1) {
 		perror("listen");
@@ -240,7 +249,7 @@ static int jrpc_server_start(jrpc_server_t *server) {
 		printf("server: waiting for connections...\n");
 
 	add_select_fds(&server->jrpc_select.fds_read, sockfd, accept_cb,
-			(void *)server, 0);
+			(void *)server, 0, NULL);
 	return 0;
 }
 
@@ -254,6 +263,19 @@ int jrpc_server_stop(jrpc_server_t *server) {
 	return 0;
 }
 
+static void _jrpc_loop_destroy(void *jrpc_loop_data) {
+	/* Don't touch jrpc_loop->server, it's destroy outside */
+	jrpc_loop_t *jrpc_loop = (jrpc_loop_t *)jrpc_loop_data;
+	free(jrpc_loop->conn->buffer);
+	free(jrpc_loop->conn);
+	free(jrpc_loop);
+}
+
 void jrpc_server_destroy(jrpc_server_t *server) {
+	/* Destroying all jrpc_select will destroy
+	 * jrpc_loop_t and jrpc_select_t
+	 */
+	destroy_jrpc_select_fds(&server->jrpc_select);
 	jrpc_procedures_destroy(&server->procedure_list);
+	free(server);
 }

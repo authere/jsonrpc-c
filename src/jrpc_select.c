@@ -14,8 +14,12 @@
 
 #include "jrpc_select.h"
 
-void fill_fd_select(fd_set *fds, jrpc_select_fds_t *jrpc_fds, int *ndfs);
-void cb_fd_select(fd_set *fds, jrpc_select_fds_t *jrpc_fds, int ndfs);
+static void _fill_fd_select(fd_set *fds, jrpc_select_fds_t *jrpc_fds,
+		int *ndfs);
+static void _cb_fd_select(fd_set *fds, jrpc_select_fds_t *jrpc_fds, int ndfs);
+static void _remove_all_fds(jrpc_select_fds_t *fds);
+static void _remove_select_fds_data(jrpc_select_fds_data_t *data);
+static void _remove_jrpc_select_all_fds(jrpc_select_t *jrpc_select);
 
 void loop_select(jrpc_select_t *jrpc_select, int debug, int *is_running) {
 	fd_set readfds, writefds, errfds;
@@ -32,9 +36,9 @@ void loop_select(jrpc_select_t *jrpc_select, int debug, int *is_running) {
 		FD_ZERO(&writefds);
 		FD_ZERO(&errfds);
 
-		fill_fd_select(&readfds, &jrpc_select->fds_read, &nfds);
-		fill_fd_select(&writefds, &jrpc_select->fds_write, &nfds);
-		fill_fd_select(&errfds, &jrpc_select->fds_err, &nfds);
+		_fill_fd_select(&readfds, &jrpc_select->fds_read, &nfds);
+		_fill_fd_select(&writefds, &jrpc_select->fds_write, &nfds);
+		_fill_fd_select(&errfds, &jrpc_select->fds_err, &nfds);
 
 		ready = 0;
 		while (*is_running && !ready) {
@@ -56,9 +60,9 @@ void loop_select(jrpc_select_t *jrpc_select, int debug, int *is_running) {
 			printf("Select receive %d fd.\n", ready);
 		if (ready > 0) {
 			/* Callback time */
-			cb_fd_select(&readfds, &jrpc_select->fds_read, nfds);
-			cb_fd_select(&writefds, &jrpc_select->fds_write, nfds);
-			cb_fd_select(&errfds, &jrpc_select->fds_err, nfds);
+			_cb_fd_select(&readfds, &jrpc_select->fds_read, nfds);
+			_cb_fd_select(&writefds, &jrpc_select->fds_write, nfds);
+			_cb_fd_select(&errfds, &jrpc_select->fds_err, nfds);
 		}
 	}
 	if (debug)
@@ -66,7 +70,7 @@ void loop_select(jrpc_select_t *jrpc_select, int debug, int *is_running) {
 }
 
 void add_select_fds(jrpc_select_fds_t *fds, int fd, void *cb, void *data,
-		int free_data) {
+		int free_data, void *destructor) {
 	int i, last_size, mem_size;
 	jrpc_select_fds_data_t *fds_data;
 
@@ -88,6 +92,7 @@ void add_select_fds(jrpc_select_fds_t *fds, int fd, void *cb, void *data,
 			fds_data[i].cb = fds->data[i].cb;
 			fds_data[i].data = fds->data[i].data;
 			fds_data[i].free_data = fds->data[i].free_data;
+			fds_data[i].destructor = fds->data[i].destructor;
 		}
 		free(fds->data);
 		fds->data = fds_data;
@@ -104,33 +109,62 @@ void add_select_fds(jrpc_select_fds_t *fds, int fd, void *cb, void *data,
 	fds_data[i].cb = (select_cb)cb;
 	fds_data[i].data = data;
 	fds_data[i].free_data = free_data;
+	fds_data[i].destructor = (destructor_cb)destructor;
 	fds->nb++;
 }
 
 int remove_select_fds(jrpc_select_fds_t *fds, int fd) {
 	/* return 0 when success */
 	int i;
+	jrpc_select_fds_data_t *data;
 	for (i = 0; i < fds->size; i++) {
-		if (fds->data[i].fd == fd) {
-			fds->data[i].fd = 0;
-			fds->data[i].cb = NULL;
-			if (fds->data[i].free_data && fds->data[i].data) {
-				free(fds->data[i].data);
-				fds->data[i].data = NULL;
-			}
+		data = &fds->data[i];
+		if (data->fd == fd) {
 			fds->nb--;
+			_remove_select_fds_data(data);
 			return 0;
 		}
 	}
 	return -1;
 }
 
-int remove_select_all_fds() {
-	/* TODO complete this and free all memory */
-	return 1;
+void destroy_jrpc_select_fds(jrpc_select_t *jrpc_select) {
+	_remove_jrpc_select_all_fds(jrpc_select);
+	free(jrpc_select->fds_read.data);
+	free(jrpc_select->fds_write.data);
+	free(jrpc_select->fds_err.data);
 }
 
-void fill_fd_select(fd_set *fds, jrpc_select_fds_t *jrpc_fds, int *ndfs) {
+static void _remove_jrpc_select_all_fds(jrpc_select_t *jrpc_select) {
+	_remove_all_fds(&jrpc_select->fds_read);
+	_remove_all_fds(&jrpc_select->fds_write);
+	_remove_all_fds(&jrpc_select->fds_err);
+}
+
+static void _remove_all_fds(jrpc_select_fds_t *fds) {
+	int i;
+	for (i = 0; i < fds->nb; i++) {
+		_remove_select_fds_data(&fds->data[i]);
+	}
+	fds->nb = 0;
+}
+
+static void _remove_select_fds_data(jrpc_select_fds_data_t *data) {
+	/* don't forget to decrement fds_nb out of this function */
+	data->fd = 0;
+	data->cb = NULL;
+	if (!data->data)
+		return 0;
+	if (data->destructor)
+		data->destructor(data->data);
+	if (data->free_data) {
+		free(data->data);
+		data->data = NULL;
+	}
+}
+
+static void _fill_fd_select(fd_set *fds, jrpc_select_fds_t *jrpc_fds,
+		int *ndfs) {
 	/* ndfs is the max number of fd */
 	int ndfs_local = *ndfs;
 	int fd, i, rc;
@@ -154,7 +188,7 @@ void fill_fd_select(fd_set *fds, jrpc_select_fds_t *jrpc_fds, int *ndfs) {
 	*ndfs = ndfs_local;
 }
 
-void cb_fd_select(fd_set *fds, jrpc_select_fds_t *jrpc_fds, int ndfs) {
+static void _cb_fd_select(fd_set *fds, jrpc_select_fds_t *jrpc_fds, int ndfs) {
 	int i, fd;
 	for (i = 0; i < jrpc_fds->size; i++) {
 		fd = jrpc_fds->data[i].fd;
