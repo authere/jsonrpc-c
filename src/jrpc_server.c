@@ -30,6 +30,7 @@ static void *get_in_addr(struct sockaddr *sa) {
 }
 
 static void close_connection(jrpc_loop_t *jrpc_loop) {
+	/* Memory is free and fd is close on destroy_jrpc_loop */
 	jrpc_conn_t *conn;
 	int res;
 	jrpc_server_t *server = jrpc_loop->server;
@@ -39,9 +40,6 @@ static void close_connection(jrpc_loop_t *jrpc_loop) {
 		fprintf(stderr, "Internal error, cannot remove fd %d\n", conn->fd);
 		exit(EXIT_FAILURE);
 	}
-	close(conn->fd);
-	free(conn->buffer);
-	free(conn);
 }
 
 static void connection_cb(int fd, jrpc_loop_t *jrpc_loop) {
@@ -250,6 +248,7 @@ static int _jrpc_server_start(jrpc_server_t *server) {
 
 	add_select_fds(&server->jrpc_select.fds_read, sockfd, accept_cb,
 			(void *)server, 0, NULL);
+	server->sockfd = sockfd;
 	return 0;
 }
 
@@ -266,6 +265,7 @@ int jrpc_server_stop(jrpc_server_t *server) {
 static void _jrpc_loop_destroy(void *jrpc_loop_data) {
 	/* Don't touch jrpc_loop->server, it's destroy outside */
 	jrpc_loop_t *jrpc_loop = (jrpc_loop_t *)jrpc_loop_data;
+	close(jrpc_loop->conn->fd);
 	free(jrpc_loop->conn->buffer);
 	free(jrpc_loop->conn);
 	free(jrpc_loop);
@@ -277,5 +277,6 @@ void jrpc_server_destroy(jrpc_server_t *server) {
 	 */
 	destroy_jrpc_select_fds(&server->jrpc_select);
 	jrpc_procedures_destroy(&server->procedure_list);
+	close(server->sockfd);
 	free(server);
 }

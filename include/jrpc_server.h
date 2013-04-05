@@ -26,6 +26,7 @@ typedef struct {
 	jrpc_select_t jrpc_select;
 	procedure_list_t procedure_list;
 	int debug_level;
+	int sockfd;
 } jrpc_server_t;
 
 typedef struct {
