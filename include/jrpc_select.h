@@ -38,5 +38,7 @@ void add_select_fds(jrpc_select_fds_t *fds, int fd, void *cb, void *data,
 /* cleanup_data set 1 to free data, else set 0 to do nothing. */
 int remove_select_fds(jrpc_select_fds_t *fds, int fd);
 int get_limit_fd_number();
+void destroy_jrpc_select_fds(jrpc_select_t *jrpc_select);
+
 
 #endif

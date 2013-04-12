@@ -37,9 +37,3 @@ or
 
 `echo '{"jsonrpc":"2.0", "method":"exit", "id":null}' | nc localhost 1234`
 `echo "{\"method\":\"exit\"}" | nc localhost 1234`
-
-Who?
-----
-
-@hmngomes
-Mathben

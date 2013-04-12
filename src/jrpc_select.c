@@ -23,13 +23,12 @@ static void _remove_jrpc_select_all_fds(jrpc_select_t *jrpc_select);
 
 void loop_select(jrpc_select_t *jrpc_select, int debug, int *is_running) {
 	fd_set readfds, writefds, errfds;
-	int ready, nfds, err;
+	int ready, nfds;
 
 	if (debug)
 		printf("Loop select started.\n");
 
 	while (*is_running) {
-		err = 0;
 		/* Initialize the file descriptor set. */
 		nfds = 0;
 		FD_ZERO(&readfds);
@@ -71,7 +70,7 @@ void loop_select(jrpc_select_t *jrpc_select, int debug, int *is_running) {
 
 void add_select_fds(jrpc_select_fds_t *fds, int fd, void *cb, void *data,
 		int free_data, void *destructor) {
-	int i, last_size, mem_size;
+	int i, last_size;
 	jrpc_select_fds_data_t *fds_data;
 
 	if (fds->nb >= fds->size) {
@@ -154,7 +153,7 @@ static void _remove_select_fds_data(jrpc_select_fds_data_t *data) {
 	data->fd = 0;
 	data->cb = NULL;
 	if (!data->data)
-		return 0;
+		return;
 	if (data->destructor)
 		data->destructor(data->data);
 	if (data->free_data) {

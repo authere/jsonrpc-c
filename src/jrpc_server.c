@@ -145,7 +145,7 @@ static void accept_cb(int fd, jrpc_server_t *server) {
 		close(conn->fd);
 		free(conn);
 		fprintf(stderr, "Reach max connection, limit %d.",
-				limit_connection, s);
+				limit_connection);
 		return;
 	}
 
