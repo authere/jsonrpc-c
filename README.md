@@ -27,9 +27,9 @@ Jrpc-c use select. It's limited by his 1024 (by default) file descriptor.
 
 ###Testing
 
-Run `autoreconf -i`  before `./configure` and `make`
+Run `make`
 
-Test the example server by running it and typing: 
+Test the example server by running it and typing:
 
 `echo '{"jsonrpc":"2.0", "method":"sayHello", "params":["sam"], "id":null}' | nc localhost 1234`
 
