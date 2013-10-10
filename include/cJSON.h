@@ -27,6 +27,8 @@
 extern "C" {
 #endif
 
+#include <sys/types.h>
+
 /* cJSON Types: */
 #define cJSON_False 0
 #define cJSON_True 1
@@ -62,6 +64,8 @@ extern void cJSON_InitHooks(cJSON_Hooks* hooks);
 
 /* Supply a block of JSON, and this returns a cJSON object you can interrogate. Call cJSON_Delete when finished. */
 extern cJSON *cJSON_Parse(const char *value);
+/* Open a file and call cJSON_Parse */
+extern cJSON *cJSON_Parse_file(const char *file_name);
 /* Supply a block of JSON, and this returns a cJSON object you can interrogate. Call cJSON_Delete when finished.
  * end_ptr will point to 1 past the end of the JSON object */
 extern cJSON *cJSON_Parse_Stream(const char *value, char **end_ptr);

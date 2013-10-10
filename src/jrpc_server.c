@@ -7,18 +7,22 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <netinet/in.h>
 #include <netdb.h>
 #include <arpa/inet.h>
+#include <termios.h>
 
 #include "jrpc_server.h"
 
-static int _jrpc_server_start(jrpc_server_t *server);
+static int _jrpc_server_start_serial(jrpc_server_t *server, int fd);
+static int _setup_serial(jrpc_server_t *server, char *serial);
 static void _jrpc_loop_destroy(void *jrpc_loop_data);
 
 // get sockaddr, IPv4 or IPv6:
@@ -121,29 +125,23 @@ static void connection_cb(int fd, jrpc_loop_t *jrpc_loop) {
 }
 
 static void accept_cb(int fd, jrpc_server_t *server) {
-	jrpc_loop_t *jrpc_loop = malloc(sizeof(jrpc_loop_t));
-	if (jrpc_loop <= 0) {
-		perror("malloc");
-		exit(EXIT_FAILURE);
-	}
+	jrpc_loop_t *jrpc_loop;
+	int fd_client;
 	int limit_connection = get_limit_fd_number();
 	char s[INET6_ADDRSTRLEN];
 	jrpc_conn_t *conn;
 	struct sockaddr_storage their_addr; // connector's address information
 
-	conn = malloc(sizeof(jrpc_conn_t));
 	socklen_t sin_size = sizeof their_addr;
 
-	conn->fd = accept(fd, (struct sockaddr *) &their_addr, &sin_size);
-	if (conn->fd == -1) {
+	fd_client = accept(fd, (struct sockaddr *) &their_addr, &sin_size);
+	if (fd_client == -1) {
 		perror("accept");
-		free(conn);
 		return;
 	}
 	/* Limitation of select */
-	if (limit_connection <= conn->fd) {
-		close(conn->fd);
-		free(conn);
+	if (limit_connection <= fd_client) {
+		close(fd_client);
 		fprintf(stderr, "Reach max connection, limit %d.",
 				limit_connection);
 		return;
@@ -153,6 +151,17 @@ static void accept_cb(int fd, jrpc_server_t *server) {
 		inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *)
 				&their_addr), s, sizeof s);
 		printf("server: got connection from %s\n", s);
+	}
+	conn = malloc(sizeof(jrpc_conn_t));
+	if (conn <= 0) {
+		perror("malloc");
+		exit(EXIT_FAILURE);
+	}
+	conn->fd = fd_client;
+	jrpc_loop = malloc(sizeof(jrpc_loop_t));
+	if (jrpc_loop <= 0) {
+		perror("malloc");
+		exit(EXIT_FAILURE);
 	}
 	//copy pointer to jrpc_server_t
 	jrpc_loop->conn = conn;
@@ -166,39 +175,31 @@ static void accept_cb(int fd, jrpc_server_t *server) {
 			(void *)jrpc_loop, 0, _jrpc_loop_destroy);
 }
 
-int jrpc_server_init(jrpc_server_t **server, int port_number) {
-	return jrpc_server_init_with_select_loop(server, port_number);
-}
-
-int jrpc_server_init_with_select_loop(jrpc_server_t **the_server, int port_number) {
+jrpc_server_t *jrpc_server_init() {
 	jrpc_server_t *server;
-	*the_server = malloc(sizeof(jrpc_server_t));
-	if (!*the_server) {
+	char *debug_level_env;
+	server = malloc(sizeof(jrpc_server_t));
+	if (!server) {
 		perror("malloc");
 		exit(EXIT_FAILURE);
 	}
-	server = *the_server;
 	memset(server, 0, sizeof(jrpc_server_t));
-	server->is_running = 0;
-	server->port_number = port_number;
-	char *debug_level_env = getenv("JRPC_DEBUG");
-	if (debug_level_env == NULL)
-		server->debug_level = 0;
-	else {
+	debug_level_env = getenv("JRPC_DEBUG");
+	if (debug_level_env != NULL)
 		server->debug_level = strtol(debug_level_env, NULL, 10);
+	if (server->debug_level)
 		printf("JSONRPC-C Debug level %d\n", server->debug_level);
-	}
-	return _jrpc_server_start(server);
+	return server;
 }
 
-static int _jrpc_server_start(jrpc_server_t *server) {
+int jrpc_server_init_socket(jrpc_server_t *server, int port) {
 	int sockfd;
 	struct addrinfo hints, *servinfo, *p;
 	int yes = 1;
 	int rv;
 	char PORT[6];
 
-	sprintf(PORT, "%d", server->port_number);
+	sprintf(PORT, "%d", port);
 	memset(&hints, 0, sizeof hints);
 	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
@@ -252,6 +253,86 @@ static int _jrpc_server_start(jrpc_server_t *server) {
 	return 0;
 }
 
+int jrpc_server_init_serial(jrpc_server_t *server, char *serial) {
+	int fd = _setup_serial(server, serial);
+	if (fd <= 0)
+		return -1;
+	return _jrpc_server_start_serial(server, fd);
+}
+
+static int _setup_serial(jrpc_server_t *server, char *serial) {
+	int fd;
+	struct termios *options;
+	fd = open(serial, O_RDWR | O_NOCTTY | O_NDELAY);
+	if (fd == -1) {
+		char msg[100];
+		sprintf(msg, "open %s", serial);
+		perror(msg);
+		return -1;
+	}
+	fcntl(fd, F_SETFL, 0); /* enable blocking read */
+
+	options = (struct termios*)malloc(sizeof(struct termios));
+	if (!options)
+		return -1;
+
+	server->options = options;
+
+	// get attribute
+	tcgetattr(fd, options);
+
+	// Set baudrate 115200
+	cfsetispeed(options, B115200);
+	cfsetospeed(options, B115200);
+
+	// Enable the receiver and set localmode
+	options->c_cflag |= (CLOCAL | CREAD);
+
+	// Set the Parity to None
+	options->c_cflag &= ~PARENB;
+	options->c_cflag &= ~CSTOPB;
+	options->c_cflag &= ~CSIZE;
+	options->c_cflag |= CS8;
+
+	// Flow control
+#ifdef CNEW_RTSCTS
+	// Disable hardware flow control
+	options->c_cflag &= ~CNEW_RTSCTS;
+#endif
+	// Disable software flow control
+	options->c_iflag &= ~(IXON | IXOFF | IXANY);
+
+	tcsetattr(fd, TCSANOW, options);
+	return fd;
+}
+
+static int _jrpc_server_start_serial(jrpc_server_t *server, int fd) {
+	jrpc_loop_t *jrpc_loop;
+	jrpc_conn_t *conn;
+	conn = malloc(sizeof(jrpc_conn_t));
+	if (conn <= 0) {
+		perror("malloc");
+		return -1;
+	}
+	conn->fd = fd;
+	jrpc_loop = malloc(sizeof(jrpc_loop_t));
+	if (jrpc_loop <= 0) {
+		perror("malloc");
+		return -1;
+	}
+	//copy pointer to jrpc_server_t
+	jrpc_loop->conn = conn;
+	jrpc_loop->server = server;
+	conn->buffer_size = 1500;
+	conn->buffer = malloc(1500);
+	memset(conn->buffer, 0, 1500);
+	conn->pos = 0;
+	conn->debug_level = server->debug_level;
+	add_select_fds(&server->jrpc_select.fds_read, fd, connection_cb,
+			(void *)jrpc_loop, 0, _jrpc_loop_destroy);
+	return 0;
+}
+
 void jrpc_server_run(jrpc_server_t *server) {
 	server->is_running = 1;
 	loop_select(&server->jrpc_select, server->debug_level, &server->is_running);
@@ -278,5 +359,7 @@ void jrpc_server_destroy(jrpc_server_t *server) {
 	destroy_jrpc_select_fds(&server->jrpc_select);
 	jrpc_procedures_destroy(&server->procedure_list);
 	close(server->sockfd);
+	if (server->options)
+		free(server->options);
 	free(server);
 }

@@ -47,7 +47,7 @@ int main(void) {
 
 	//setenv("JRPC_DEBUG", "1", 1); /* uncomment to active debug */
 
-	jrpc_server_init(&my_server, PORT);
+	my_server = jrpc_server_init(PORT);
 	jrpc_register_procedure(&my_server->procedure_list, say_hello, "sayHello", NULL);
 	jrpc_register_procedure(&my_server->procedure_list, exit_server, "exit", NULL);
 
