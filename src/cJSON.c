@@ -30,6 +30,8 @@
 #include <float.h>
 #include <limits.h>
 #include <ctype.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include "cJSON.h"
 
 static const char *ep;
@@ -337,6 +339,56 @@ static const char *parse_array(cJSON *item, const char *value);
 static char *print_array(cJSON *item, int depth, int fmt);
 static const char *parse_object(cJSON *item, const char *value);
 static char *print_object(cJSON *item, int depth, int fmt);
+static unsigned char *read_whole_file(const char *file_name);
+static unsigned get_file_size(const char *file_name);
+
+static unsigned get_file_size(const char *file_name)
+{
+	struct stat sb;
+	if (stat(file_name, &sb) != 0) {
+		perror("stat");
+		return -1;
+	}
+	return sb.st_size;
+}
+
+static unsigned char *read_whole_file(const char *file_name)
+{
+	unsigned int s;
+	unsigned char *contents;
+	FILE *f;
+	size_t bytes_read;
+	int status;
+
+	if (access(file_name, F_OK) == -1) {
+		return NULL;
+	}
+	s = get_file_size(file_name);
+	contents = malloc(s + 1);
+	if (!contents) {
+		perror("malloc");
+		exit(EXIT_FAILURE);
+	}
+
+	f = fopen(file_name, "r");
+	if (!f) {
+		perror("fopen");
+		exit(EXIT_FAILURE);
+	}
+	bytes_read = fread(contents, sizeof(unsigned char), s, f);
+	if (bytes_read != s) {
+		fprintf(stderr, "Short read of '%s': expected %d bytes but "
+				"got %d.\n",
+				file_name, s, (int)bytes_read);
+		free(contents);
+		contents = NULL;
+	}
+	status = fclose(f);
+	if (status) {
+		perror("fclose");
+	}
+	return contents;
+}
 
 /* Utility to jump whitespace and cr/lf */
 static const char *skip(const char *in) {
@@ -357,6 +409,18 @@ cJSON *cJSON_Parse(const char *value) {
 		return 0;
 	}
 	return c;
+}
+
+/* Open file, read it and call cJSON_Parse */
+cJSON *cJSON_Parse_file(const char *file_name) {
+	unsigned char *config;
+	cJSON *item;
+	config = read_whole_file(file_name);
+	if (!config)
+		return 0;
+	item = cJSON_Parse((const char *)config);
+	free(config);
+	return item;
 }
 
 /* Parse an object - create a new root, and populate
